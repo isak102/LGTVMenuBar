@@ -623,6 +623,26 @@ public final class TVController: TVControllerProtocol {
         currentInput = input
     }
 
+    /// Insert text into the currently focused TV text field.
+    public func sendText(_ text: String) async throws {
+        try await webOSClient.sendCommand(.insertText(text))
+    }
+
+    /// Delete characters before the cursor in the currently focused TV text field.
+    public func deleteCharacters(_ count: Int) async throws {
+        try await webOSClient.sendCommand(.deleteCharacters(count))
+    }
+
+    /// Send Return to the currently focused TV text field.
+    public func sendEnterKey() async throws {
+        try await webOSClient.sendCommand(.sendEnterKey)
+    }
+
+    /// Send a remote navigation button to the TV.
+    public func sendNavigationButton(_ button: TVNavigationButton) async throws {
+        try await webOSClient.sendNavigationButton(button)
+    }
+
     /// Refresh the installed app list from the TV launcher
     public func refreshInstalledApps() async {
         guard isWebOSConnectionReady else {

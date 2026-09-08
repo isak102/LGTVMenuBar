@@ -37,6 +37,8 @@ struct MenuBarView: View {
             let arylicOnly = false
             #endif
             if controller.connectionState.isConnected {
+                TextInputSection(controller: controller, onError: reportActionError)
+                Divider()
                 QuickActionsSection(controller: controller, audioOutputType: audioOutputType, onError: reportActionError)
                 Divider()
                 VolumeSection(controller: controller, onError: reportActionError)
@@ -153,6 +155,133 @@ private struct StatusSection: View {
         case .registering: return "Pairing..."
         case .disconnected: return "Disconnected"
         case .error: return "Connection Error"
+        }
+    }
+}
+
+// MARK: - Text Input Section
+
+private struct TextInputSection: View {
+    let controller: TVController
+    let onError: (Error) -> Void
+    @State private var text = ""
+    @State private var clearsTextOnNextChange = false
+    @State private var keyboardTask: Task<Void, Never>?
+
+    var body: some View {
+        TVKeyboardTextField(text: $text, onDelete: sendDelete, onNavigation: sendNavigationButton)
+            .onChange(of: text) { _, newText in
+                textDidChange(newText)
+            }
+    }
+
+    private func textDidChange(_ newText: String) {
+        if clearsTextOnNextChange {
+            clearsTextOnNextChange = false
+            return
+        }
+        guard !newText.isEmpty else { return }
+
+        enqueue {
+            try await controller.sendText(newText)
+        }
+        clearsTextOnNextChange = true
+        text = ""
+    }
+
+    private func sendDelete() {
+        enqueue {
+            try await controller.deleteCharacters(1)
+        }
+    }
+
+    private func sendNavigationButton(_ button: TVNavigationButton) {
+        enqueue {
+            try await controller.sendNavigationButton(button)
+        }
+    }
+
+    private func enqueue(_ operation: @escaping @MainActor () async throws -> Void) {
+        let previousTask = keyboardTask
+        keyboardTask = Task { @MainActor in
+            _ = await previousTask?.result
+            do {
+                try await operation()
+            } catch {
+                onError(error)
+            }
+        }
+    }
+}
+
+private struct TVKeyboardTextField: NSViewRepresentable {
+    @Binding var text: String
+    let onDelete: () -> Void
+    let onNavigation: (TVNavigationButton) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onDelete: onDelete, onNavigation: onNavigation)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.placeholderString = "Type or paste to TV"
+        textField.bezelStyle = .roundedBezel
+        textField.delegate = context.coordinator
+        textField.setAccessibilityLabel("TV keyboard")
+        DispatchQueue.main.async {
+            textField.window?.makeFirstResponder(textField)
+        }
+        return textField
+    }
+
+    func updateNSView(_ textField: NSTextField, context: Context) {
+        if textField.stringValue != text {
+            textField.stringValue = text
+        }
+        context.coordinator.onDelete = onDelete
+        context.coordinator.onNavigation = onNavigation
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        @Binding private var text: String
+        var onDelete: () -> Void
+        var onNavigation: (TVNavigationButton) -> Void
+
+        init(text: Binding<String>, onDelete: @escaping () -> Void, onNavigation: @escaping (TVNavigationButton) -> Void) {
+            self._text = text
+            self.onDelete = onDelete
+            self.onNavigation = onNavigation
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            text = (notification.object as? NSTextField)?.stringValue ?? ""
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            switch commandSelector {
+            case #selector(NSResponder.deleteBackward(_:)):
+                onDelete()
+                return true
+            case #selector(NSResponder.moveUp(_:)):
+                onNavigation(.up)
+                return true
+            case #selector(NSResponder.moveDown(_:)):
+                onNavigation(.down)
+                return true
+            case #selector(NSResponder.moveLeft(_:)):
+                onNavigation(.left)
+                return true
+            case #selector(NSResponder.moveRight(_:)):
+                onNavigation(.right)
+                return true
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertLineBreak(_:)):
+                onNavigation(.enter)
+                return true
+            default:
+                return false
+            }
         }
     }
 }

@@ -132,6 +132,42 @@ struct TVControllerConnectionTests {
         #expect(appId == "netflix")
     }
 
+    @Test("send text inserts it into the focused TV field")
+    func sendTextInsertsIntoFocusedTVField() async throws {
+        let mockWebOS = MockWebOSClient()
+        let controller = TVController(
+            webOSClient: mockWebOS,
+            wolService: MockWOLService(),
+            powerManager: MockPowerManager(),
+            keychainManager: MockKeychainManager(),
+            mediaKeyManager: MockMediaKeyManager(),
+            launchAtLoginManager: MockLaunchAtLoginManager(),
+            diagnosticLogger: MockDiagnosticLogger()
+        )
+
+        try await controller.sendText("Pasted text ✅")
+        try await controller.deleteCharacters(1)
+        try await controller.sendEnterKey()
+        try await controller.sendNavigationButton(.enter)
+
+        let sent = mockWebOS.sendCommandCalls.map(\.command)
+        guard case .insertText(let text) = sent[0] else {
+            Issue.record("Expected insertText command")
+            return
+        }
+        #expect(text == "Pasted text ✅")
+        guard case .deleteCharacters(let count) = sent[1] else {
+            Issue.record("Expected deleteCharacters command")
+            return
+        }
+        #expect(count == 1)
+        guard case .sendEnterKey = sent[2] else {
+            Issue.record("Expected sendEnterKey command")
+            return
+        }
+        #expect(mockWebOS.navigationButtonCalls.last?.button == .enter)
+    }
+
     @Test("connect requests installed apps")
     func connectRequestsInstalledApps() async throws {
         let mockWebOS = MockWebOSClient()

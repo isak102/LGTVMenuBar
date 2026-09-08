@@ -60,6 +60,18 @@ final class MockTVController: TVControllerProtocol, Sendable {
     /// History of switchInput calls
     private(set) var switchInputCalls: [(input: TVInputType, timestamp: Date)] = []
 
+    /// History of sendText calls
+    private(set) var sendTextCalls: [(text: String, timestamp: Date)] = []
+
+    /// History of deleteCharacters calls
+    private(set) var deleteCharactersCalls: [(count: Int, timestamp: Date)] = []
+
+    /// History of sendEnterKey calls
+    private(set) var sendEnterKeyCalls: [Date] = []
+
+    /// History of remote navigation button presses
+    private(set) var navigationButtonCalls: [(button: TVNavigationButton, timestamp: Date)] = []
+
     /// History of launchApp calls
     private(set) var launchAppCalls: [(app: TVApp, timestamp: Date)] = []
 
@@ -293,6 +305,54 @@ final class MockTVController: TVControllerProtocol, Sendable {
         
         currentInput = input
     }
+
+    func sendText(_ text: String) async throws {
+        sendTextCalls.append((text: text, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func deleteCharacters(_ count: Int) async throws {
+        deleteCharactersCalls.append((count: count, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func sendEnterKey() async throws {
+        sendEnterKeyCalls.append(Date())
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func sendNavigationButton(_ button: TVNavigationButton) async throws {
+        navigationButtonCalls.append((button: button, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
     
     func refreshInstalledApps() async {
         refreshInstalledAppsCalls.append(Date())
@@ -372,6 +432,10 @@ final class MockTVController: TVControllerProtocol, Sendable {
         setVolumeCalls.removeAll()
         toggleMuteCalls.removeAll()
         switchInputCalls.removeAll()
+        sendTextCalls.removeAll()
+        deleteCharactersCalls.removeAll()
+        sendEnterKeyCalls.removeAll()
+        navigationButtonCalls.removeAll()
         launchAppCalls.removeAll()
         refreshInstalledAppsCalls.removeAll()
         isLaunchAtLoginEnabledCalls.removeAll()
@@ -408,6 +472,10 @@ final class MockTVController: TVControllerProtocol, Sendable {
     var setVolumeCallCount: Int { setVolumeCalls.count }
     var toggleMuteCallCount: Int { toggleMuteCalls.count }
     var switchInputCallCount: Int { switchInputCalls.count }
+    var sendTextCallCount: Int { sendTextCalls.count }
+    var deleteCharactersCallCount: Int { deleteCharactersCalls.count }
+    var sendEnterKeyCallCount: Int { sendEnterKeyCalls.count }
+    var navigationButtonCallCount: Int { navigationButtonCalls.count }
     var launchAppCallCount: Int { launchAppCalls.count }
     var refreshInstalledAppsCallCount: Int { refreshInstalledAppsCalls.count }
     var isLaunchAtLoginEnabledCallCount: Int { isLaunchAtLoginEnabledCalls.count }

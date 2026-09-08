@@ -46,6 +46,10 @@ public protocol TVControllerProtocol: Sendable {
     // MARK: - Input Control
     
     func switchInput(_ input: TVInputType) async throws
+    func sendText(_ text: String) async throws
+    func deleteCharacters(_ count: Int) async throws
+    func sendEnterKey() async throws
+    func sendNavigationButton(_ button: TVNavigationButton) async throws
     func refreshInstalledApps() async
     func launchApp(_ app: TVApp) async throws
     func setSoundOutput(_ output: TVSoundOutput) async throws

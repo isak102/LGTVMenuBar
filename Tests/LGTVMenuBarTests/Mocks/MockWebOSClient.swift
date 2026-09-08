@@ -48,6 +48,9 @@ final class MockWebOSClient: WebOSClientProtocol {
     /// History of sendCommand calls
     private(set) var sendCommandCalls: [(command: WebOSCommand, timestamp: Date)] = []
 
+    /// History of remote navigation button presses
+    private(set) var navigationButtonCalls: [(button: TVNavigationButton, timestamp: Date)] = []
+
     /// History of power status requests
     private(set) var getPowerStatusCalls: [Date] = []
     
@@ -124,6 +127,15 @@ final class MockWebOSClient: WebOSClientProtocol {
         }
     }
 
+    func sendNavigationButton(_ button: TVNavigationButton) async throws {
+        navigationButtonCalls.append((button: button, timestamp: Date()))
+
+        if shouldThrowOnSendCommand {
+            transitionToErrorIfNeeded(errorToThrow)
+            throw errorToThrow
+        }
+    }
+
     func getPowerStatus() async throws -> TVPowerStatus {
         getPowerStatusCalls.append(Date())
 
@@ -190,6 +202,7 @@ final class MockWebOSClient: WebOSClientProtocol {
         connectCalls.removeAll()
         disconnectCalls.removeAll()
         sendCommandCalls.removeAll()
+        navigationButtonCalls.removeAll()
         getPowerStatusCalls.removeAll()
         
         shouldThrowOnConnect = false

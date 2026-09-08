@@ -2,12 +2,23 @@ import Foundation
 import Network
 import OSLog
 
+private struct WebOSCommandResponse: Sendable {
+    let powerStatus: TVPowerStatus
+    let socketPath: String?
+
+    init(payload: [String: Any] = [:]) {
+        self.powerStatus = TVPowerStatus(payload: payload)
+        self.socketPath = payload["socketPath"] as? String
+    }
+}
+
 @MainActor
 public protocol WebOSClientProtocol {
     var connectionState: ConnectionState { get }
     func connect(to configuration: TVConfiguration, stateChangeCallback: @escaping @Sendable (ConnectionState) -> Void) async throws
     func disconnect()
     func sendCommand(_ command: WebOSCommand) async throws
+    func sendNavigationButton(_ button: TVNavigationButton) async throws
     func getPowerStatus() async throws -> TVPowerStatus
     func setCapabilityCallback(_ callback: @escaping @Sendable (TVCapabilities) -> Void)
     func setInputChangeCallback(_ callback: @escaping @Sendable (TVInputType) -> Void)
@@ -88,7 +99,10 @@ final class WebOSClient: WebOSClientProtocol {
     private var messageCounter = 1
     
     /// Pending requests awaiting responses
-    private var pendingRequests: [String: CheckedContinuation<TVPowerStatus, Error>] = [:]
+    private var pendingRequests: [String: CheckedContinuation<WebOSCommandResponse, Error>] = [:]
+
+    /// Separate socket used for remote navigation buttons.
+    private var pointerInputSocket: URLSessionWebSocketTask?
 
     /// Continuation used while waiting for the TV to acknowledge registration.
     private var handshakeContinuation: CheckedContinuation<Void, Error>?
@@ -160,6 +174,8 @@ final class WebOSClient: WebOSClientProtocol {
         _connectionState = .disconnected
         webSocketTask?.cancel()
         webSocketTask = nil
+        pointerInputSocket?.cancel()
+        pointerInputSocket = nil
     }
     
     /// Connect to the TV using WebSocket
@@ -181,6 +197,8 @@ final class WebOSClient: WebOSClientProtocol {
             _ = beginConnectionAttempt()
             webSocketTask?.cancel()
             webSocketTask = nil
+            pointerInputSocket?.cancel()
+            pointerInputSocket = nil
             handshakeCompleted = false
             failHandshake(LGTVError.webosError("Connection reset"))
             // Fail any pending requests
@@ -293,6 +311,8 @@ final class WebOSClient: WebOSClientProtocol {
         
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        pointerInputSocket?.cancel(with: .normalClosure, reason: nil)
+        pointerInputSocket = nil
 
         failHandshake(LGTVError.webosError("Connection closed"), attemptID: attemptID)
         
@@ -319,6 +339,8 @@ final class WebOSClient: WebOSClientProtocol {
 
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
+        pointerInputSocket?.cancel(with: .goingAway, reason: nil)
+        pointerInputSocket = nil
         handshakeCompleted = false
         failHandshake(error, attemptID: attemptID)
 
@@ -342,6 +364,14 @@ final class WebOSClient: WebOSClientProtocol {
     func sendCommand(_ command: WebOSCommand) async throws {
         guard _connectionState == .connected, handshakeCompleted else {
             throw LGTVError.webosError("Not connected to TV")
+        }
+
+        switch command {
+        case .insertText(_), .deleteCharacters(_), .sendEnterKey:
+            _ = try await sendCommandAwaitingResponse(command)
+            return
+        default:
+            break
         }
 
         if let testSendCommandHandler {
@@ -390,6 +420,29 @@ final class WebOSClient: WebOSClientProtocol {
             throw error
         } catch {
             throw LGTVError.webosError("Failed to send command: \(error.localizedDescription)")
+        }
+    }
+
+    func sendNavigationButton(_ button: TVNavigationButton) async throws {
+        guard _connectionState == .connected, handshakeCompleted else {
+            throw LGTVError.webosError("Not connected to TV")
+        }
+
+        let socket = try await pointerInputSocketTask()
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                socket.send(.string("type:button\nname:\(button.rawValue)\n\n")) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            pointerInputSocket?.cancel(with: .goingAway, reason: nil)
+            pointerInputSocket = nil
+            throw LGTVError.webosError("Failed to send remote button: \(error.localizedDescription)")
         }
     }
 
@@ -643,6 +696,8 @@ final class WebOSClient: WebOSClientProtocol {
             await handleRegisteredMessage(messageDict, attemptID: attemptID)
         case "response":
             await handleResponseMessage(messageDict)
+        case "error":
+            await handleErrorMessage(messageDict)
         case "push":
             await handlePushMessage(messageDict)
         default:
@@ -767,6 +822,16 @@ final class WebOSClient: WebOSClientProtocol {
         }
     }
     
+    private func handleErrorMessage(_ messageDict: [String: Any]) async {
+        guard let requestID = messageDict["id"] as? String,
+              let pendingRequest = pendingRequests.removeValue(forKey: requestID) else {
+            return
+        }
+
+        let payload = messageDict["payload"] as? [String: Any] ?? [:]
+        pendingRequest.resume(throwing: webOSRequestError(from: payload, fallback: "WebOS request failed"))
+    }
+
     /// Handle push message
     private func handlePushMessage(_ messageDict: [String: Any]) async {
         guard let payload = messageDict["payload"] as? [String: Any] else { return }
@@ -922,22 +987,47 @@ final class WebOSClient: WebOSClientProtocol {
         }
     }
 
+    private func pointerInputSocketTask() async throws -> URLSessionWebSocketTask {
+        if let pointerInputSocket {
+            return pointerInputSocket
+        }
+
+        let response = try await sendCommandAwaitingResponse(.getPointerInputSocket)
+        guard let socketPath = response.socketPath,
+              let socketURL = URL(string: socketPath) else {
+            throw LGTVError.webosError("TV did not provide a pointer input socket")
+        }
+
+        let session = socketURL.scheme == "wss" ? sslURLSession : urlSession
+        let socket = session.webSocketTask(with: socketURL)
+        socket.resume()
+        pointerInputSocket = socket
+        return socket
+    }
+
     private func sendPowerStatusRequest(timeout: TimeInterval = 5) async throws -> TVPowerStatus {
+        try await sendCommandAwaitingResponse(.getPowerState, timeout: timeout).powerStatus
+    }
+
+    private func sendCommandAwaitingResponse(
+        _ command: WebOSCommand,
+        timeout: TimeInterval = 5
+    ) async throws -> WebOSCommandResponse {
         guard _connectionState == .connected, handshakeCompleted else {
             throw LGTVError.webosError("Not connected to TV")
         }
 
         if let testSendCommandHandler {
             do {
-                try await testSendCommandHandler(.getPowerState)
-                return TVPowerStatus()
+                try await testSendCommandHandler(command)
+                return WebOSCommandResponse()
             } catch {
                 handleConnectionFailure(error)
                 throw error
             }
         }
 
-        let messageDict = try createCommandMessage(.getPowerState)
+        let messageDict = try createCommandMessage(command)
         guard let requestID = messageDict["id"] as? String else {
             throw LGTVError.webosError("Request message is missing an id")
         }
@@ -973,7 +1063,7 @@ final class WebOSClient: WebOSClientProtocol {
                 try? await Task.sleep(for: .seconds(timeout))
                 guard let self else { return }
                 if let pendingRequest = self.pendingRequests.removeValue(forKey: requestID) {
-                    pendingRequest.resume(throwing: LGTVError.webosError("Request timed out: getPowerState"))
+                    pendingRequest.resume(throwing: LGTVError.webosError("Request timed out: \(String(describing: command))"))
                 }
             }
         }
@@ -985,19 +1075,23 @@ final class WebOSClient: WebOSClientProtocol {
             return
         }
 
-        if let returnValue = payload["returnValue"] as? Bool, returnValue == false {
-            let errorText = payload["errorText"] as? String
-            let errorCode = payload["errorCode"] as? String
-            let message: String
-            if let errorText, let errorCode {
-                message = "\(errorText) (\(errorCode))"
-            } else {
-                message = errorText ?? errorCode ?? "WebOS request failed"
-            }
-            pendingRequest.resume(throwing: LGTVError.webosError(message.isEmpty ? "WebOS request failed" : message))
+        if let returnValue = payload["returnValue"] as? Bool, !returnValue {
+            pendingRequest.resume(throwing: webOSRequestError(from: payload, fallback: "WebOS request failed"))
         } else {
-            pendingRequest.resume(returning: TVPowerStatus(payload: payload))
+            pendingRequest.resume(returning: WebOSCommandResponse(payload: payload))
         }
+    }
+
+    private func webOSRequestError(from payload: [String: Any], fallback: String) -> LGTVError {
+        let errorText = payload["errorText"] as? String
+        let errorCode = payload["errorCode"].map { String(describing: $0) }
+        let message: String
+        if let errorText, let errorCode {
+            message = "\(errorText) (\(errorCode))"
+        } else {
+            message = errorText ?? errorCode ?? fallback
+        }
+        return .webosError(message.isEmpty ? fallback : message)
     }
 
     private func failHandshake(_ error: Error, attemptID: UInt64? = nil) {
@@ -1085,9 +1179,19 @@ final class WebOSClient: WebOSClientProtocol {
             message["uri"] = "ssap://tv/getInputList"
         case .getInstalledApps:
             message["uri"] = "ssap://com.webos.applicationManager/listLaunchPoints"
+        case .getPointerInputSocket:
+            message["uri"] = "ssap://com.webos.service.networkinput/getPointerInputSocket"
         case .launchApp(let appId):
             message["uri"] = "ssap://com.webos.applicationManager/launch"
             message["payload"] = ["id": appId]
+        case .insertText(let text):
+            message["uri"] = "ssap://com.webos.service.ime/insertText"
+            message["payload"] = ["text": text]
+        case .deleteCharacters(let count):
+            message["uri"] = "ssap://com.webos.service.ime/deleteCharacters"
+            message["payload"] = ["count": count]
+        case .sendEnterKey:
+            message["uri"] = "ssap://com.webos.service.ime/sendEnterKey"
         case .powerOn:
             message["uri"] = "ssap://system/turnOn"
         case .powerOff:
