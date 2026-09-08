@@ -18,9 +18,9 @@ public enum TVSoundOutput: String, CaseIterable, Sendable, Equatable {
     /// External outputs (ARC, optical, etc.) only support +/- buttons
     public var supportsVolumeSlider: Bool {
         switch self {
-        case .tvSpeaker, .headphone, .lineout, .speakerHeadphone:
+        case .tvSpeaker, .headphone, .lineout, .speakerHeadphone, .externalSpeaker:
             return true
-        case .externalArc, .externalOptical, .bluetooth, .externalSpeaker, .unknown:
+        case .externalArc, .externalOptical, .bluetooth, .unknown:
             return false
         }
     }

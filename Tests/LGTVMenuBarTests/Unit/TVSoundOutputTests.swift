@@ -88,9 +88,9 @@ struct TVSoundOutputTests {
         #expect(TVSoundOutput.bluetooth.supportsVolumeSlider == false)
     }
     
-    @Test("externalSpeaker does not support volume slider")
-    func externalSpeakerDoesNotSupportVolumeSlider() {
-        #expect(TVSoundOutput.externalSpeaker.supportsVolumeSlider == false)
+    @Test("externalSpeaker supports volume slider")
+    func externalSpeakerSupportsVolumeSlider() {
+        #expect(TVSoundOutput.externalSpeaker.supportsVolumeSlider == true)
     }
     
     @Test("unknown does not support volume slider")
