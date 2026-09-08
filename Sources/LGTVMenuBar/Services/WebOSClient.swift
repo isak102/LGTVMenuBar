@@ -13,6 +13,7 @@ public protocol WebOSClientProtocol {
     func setInputChangeCallback(_ callback: @escaping @Sendable (TVInputType) -> Void)
     func setVolumeChangeCallback(_ callback: @escaping @Sendable (Int, Bool) -> Void)
     func setInputListCallback(_ callback: @escaping @Sendable ([String: String]) -> Void)
+    func setInstalledAppsCallback(_ callback: @escaping @Sendable ([TVApp]) -> Void)
     func setSoundOutputChangeCallback(_ callback: @escaping @Sendable (TVSoundOutput) -> Void)
     func setDiagnosticPayloadCallback(_ callback: @escaping (String, String) -> Void)
 }
@@ -68,6 +69,9 @@ final class WebOSClient: WebOSClientProtocol {
     /// Callback for volume changes
     private var volumeChangeCallback: (@Sendable (Int, Bool) -> Void)?
     
+    /// Callback for installed app list updates
+    private var installedAppsCallback: (@Sendable ([TVApp]) -> Void)?
+
     /// Callback for input list with icons
     private var inputListCallback: (@Sendable ([String: String]) -> Void)?
     
@@ -417,6 +421,12 @@ final class WebOSClient: WebOSClientProtocol {
         self.inputListCallback = callback
     }
     
+    /// Set callback for installed app list updates
+    /// - Parameter callback: Closure called when the installed app list is received
+    func setInstalledAppsCallback(_ callback: @escaping @Sendable ([TVApp]) -> Void) {
+        self.installedAppsCallback = callback
+    }
+
     /// Set callback for sound output changes
     /// - Parameter callback: Closure called when sound output changes
     func setSoundOutputChangeCallback(_ callback: @escaping @Sendable (TVSoundOutput) -> Void) {
@@ -428,6 +438,80 @@ final class WebOSClient: WebOSClientProtocol {
     }
     
     // MARK: - Private Methods
+
+    /// Registration manifest sent during the pairing handshake.
+    /// Uses a generic identity (no LG signature): on webOS 26 (firmware 43.x)
+    /// the TV grants zero permissions to other manifest forms, answering every
+    /// request with `401 insufficient permissions`.
+    static func registrationManifest() -> [String: Any] {
+        [
+            "manifestVersion": 1,
+            "appVersion": "1.0",
+            "signatures": [
+                [
+                    "signature": "dummy_signature",
+                    "signatureVersion": 1
+                ]
+            ],
+            "signed": [
+                "created": "20240101",
+                "appId": "com.lgtvmenubar.app",
+                "localizedAppNames": ["": "LGTV Menu Bar"],
+                "localizedVendorNames": ["": "LGTV Menu Bar"],
+                "permissions": [
+                    "TEST_SECURE",
+                    "CONTROL_INPUT_TEXT",
+                    "CONTROL_MOUSE_AND_KEYBOARD",
+                    "READ_INSTALLED_APPS",
+                    "READ_LGE_SDX",
+                    "READ_NOTIFICATIONS",
+                    "SEARCH",
+                    "WRITE_SETTINGS",
+                    "WRITE_NOTIFICATION_ALERT",
+                    "CONTROL_POWER",
+                    "READ_CURRENT_CHANNEL",
+                    "READ_RUNNING_APPS",
+                    "READ_UPDATE_INFO",
+                    "UPDATE_FROM_REMOTE_APP",
+                    "READ_LGE_TV_INPUT_EVENTS",
+                    "READ_TV_CURRENT_TIME",
+                ],
+                "serial": "lgtvmenubar",
+            ],
+            "permissions": [
+                "LAUNCH",
+                "LAUNCH_WEBAPP",
+                "APP_TO_APP",
+                "CLOSE",
+                "TEST_OPEN",
+                "TEST_PROTECTED",
+                "CONTROL_AUDIO",
+                "CONTROL_DISPLAY",
+                "CONTROL_INPUT_JOYSTICK",
+                "CONTROL_INPUT_MEDIA_RECORDING",
+                "CONTROL_INPUT_MEDIA_PLAYBACK",
+                "CONTROL_INPUT_TV",
+                "CONTROL_POWER",
+                "CONTROL_TV_SCREEN",
+                "CONTROL_INPUT_TEXT",
+                "CONTROL_MOUSE_AND_KEYBOARD",
+                "CONTROL_POWER_ON_SCREEN",
+                "READ_APP_STATUS",
+                "READ_CURRENT_CHANNEL",
+                "READ_INPUT_DEVICE_LIST",
+                "READ_NETWORK_STATE",
+                "READ_RUNNING_APPS",
+                "READ_TV_CHANNEL_LIST",
+                "READ_POWER_STATE",
+                "READ_COUNTRY_INFO",
+                "READ_INSTALLED_APPS",
+                "READ_SETTINGS",
+                "WRITE_NOTIFICATION_TOAST",
+            ],
+            "signerId": "com.lgtvmenubar",
+            "appId": "com.lgtvmenubar.app",
+        ]
+    }
 
     @discardableResult
     private func beginConnectionAttempt() -> UInt64 {
@@ -471,44 +555,7 @@ final class WebOSClient: WebOSClientProtocol {
         var payload: [String: Any] = [
             "forcePairing": false,
             "pairingType": "PROMPT",
-            "manifest": [
-                "manifestVersion": 1,
-                "appVersion": "1.0",
-                "signatures": [
-                    [
-                        "signature": "dummy_signature",
-                        "signatureVersion": 1
-                    ]
-                ],
-                "permissions": [
-                    "LAUNCH",
-                    "LAUNCH_WEBAPP",
-                    "APP_TO_APP",
-                    "CLOSE",
-                    "TEST_OPEN",
-                    "TEST_PROTECTED",
-                    "CONTROL_AUDIO",
-                    "CONTROL_DISPLAY",
-                    "CONTROL_INPUT_JOYSTICK",
-                    "CONTROL_INPUT_MEDIA_RECORDING",
-                    "CONTROL_INPUT_MEDIA_PLAYBACK",
-                    "CONTROL_INPUT_TV",
-                    "CONTROL_POWER",
-                    "READ_APP_STATUS",
-                    "READ_INPUT_DEVICE_LIST",
-                    "READ_NETWORK_STATE",
-                    "READ_RUNNING_APPS",
-                    "READ_TV_CHANNEL_LIST",
-                    "WRITE_NOTIFICATION_TOAST",
-                    "READ_SETTINGS",
-                    "WRITE_SETTINGS",
-                    "CONTROL_POINTER",
-                    "CONTROL_MOUSE_AND_KEYBOARD",
-                    "CONTROL_POWER_ON_SCREEN"
-                ],
-                "signerId": "com.lgtvmenubar",
-                "appId": "com.lgtvmenubar.app"
-            ]
+            "manifest": WebOSClient.registrationManifest(),
         ]
         
         // Include client key if we have one
@@ -700,6 +747,14 @@ final class WebOSClient: WebOSClientProtocol {
             }
             if !inputIcons.isEmpty {
                 inputListCallback?(inputIcons)
+            }
+        }
+
+        // Installed apps (from listLaunchPoints)
+        if payload["launchPoints"] != nil || payload["apps"] != nil {
+            let apps = TVApp.parseListLaunchPoints(payload)
+            if !apps.isEmpty {
+                installedAppsCallback?(apps)
             }
         }
         
@@ -1028,6 +1083,11 @@ final class WebOSClient: WebOSClientProtocol {
             message["uri"] = "ssap://com.webos.applicationManager/getForegroundAppInfo"
         case .getInputList:
             message["uri"] = "ssap://tv/getInputList"
+        case .getInstalledApps:
+            message["uri"] = "ssap://com.webos.applicationManager/listLaunchPoints"
+        case .launchApp(let appId):
+            message["uri"] = "ssap://com.webos.applicationManager/launch"
+            message["payload"] = ["id": appId]
         case .powerOn:
             message["uri"] = "ssap://system/turnOn"
         case .powerOff:

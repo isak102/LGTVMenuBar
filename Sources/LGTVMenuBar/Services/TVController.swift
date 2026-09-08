@@ -38,6 +38,9 @@ public final class TVController: TVControllerProtocol {
     
     /// Current input
     public private(set) var currentInput: TVInputType?
+
+    /// Installed apps from the TV launcher (populated after connection)
+    public private(set) var installedApps: [TVApp] = []
     
     /// Current sound output
     public private(set) var soundOutput: TVSoundOutput = .unknown
@@ -321,6 +324,9 @@ public final class TVController: TVControllerProtocol {
             throw LGTVError.webosError("Connection still in progress")
         }
 
+        // The state-change callback may not have been applied yet; sync before
+        // requesting details so isWebOSConnectionReady reflects the live state.
+        syncConnectionStateFromWebOSClient()
         await requestDeviceDetailsCommands()
         
         #if LOCAL_ARYLIC_BUILD
@@ -616,6 +622,29 @@ public final class TVController: TVControllerProtocol {
         try await webOSClient.sendCommand(.setInput(input.rawValue))
         currentInput = input
     }
+
+    /// Refresh the installed app list from the TV launcher
+    public func refreshInstalledApps() async {
+        guard isWebOSConnectionReady else {
+            syncConnectionStateFromWebOSClient()
+            return
+        }
+
+        do {
+            try await webOSClient.sendCommand(.getInstalledApps)
+        } catch {
+            if !webOSClient.connectionState.isConnected {
+                syncConnectionStateFromWebOSClient()
+            }
+            logDiagnostic(level: "warning", category: "TVController", message: "Failed to request installed apps", metadata: ["error": error.localizedDescription])
+        }
+    }
+
+    /// Launch an installed app on the TV
+    /// - Parameter app: The app to launch
+    public func launchApp(_ app: TVApp) async throws {
+        try await webOSClient.sendCommand(.launchApp(app.id))
+    }
     
     /// Set TV sound output
     /// - Parameter output: The sound output to switch to
@@ -758,6 +787,11 @@ public final class TVController: TVControllerProtocol {
         volume = 32
         isMuted = false
         currentInput = .hdmi1
+        installedApps = [
+            TVApp(id: "netflix", title: "Netflix"),
+            TVApp(id: "youtube.leanback.v4", title: "YouTube"),
+            TVApp(id: "com.webos.app.livetv", title: "Live TV"),
+        ]
         soundOutput = .externalArc
         isMediaKeyControlEnabled = false
     }
@@ -810,6 +844,17 @@ public final class TVController: TVControllerProtocol {
             }
         }
         
+        // WebOS installed apps updates
+        webOSClient.setInstalledAppsCallback { [weak self] apps in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                self.installedApps = apps.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                if self.isDiagnosticCaptureActive {
+                    self.logDiagnostic(level: "warning", category: "TVController", message: "Installed apps updated", metadata: ["count": "\(apps.count)"])
+                }
+            }
+        }
+
         // WebOS sound output changes
         webOSClient.setSoundOutputChangeCallback { [weak self] output in
             Task { @MainActor [weak self] in
@@ -1329,6 +1374,7 @@ public final class TVController: TVControllerProtocol {
     private func requestDeviceDetailsCommands() async {
         guard await requestDeviceDetailCommand(.getCurrentForegroundAppInfo, failureMessage: "Failed to request foreground app info") else { return }
         guard await requestDeviceDetailCommand(.getInputList, failureMessage: "Failed to request input list") else { return }
+        guard await requestDeviceDetailCommand(.getInstalledApps, failureMessage: "Failed to request installed apps") else { return }
         guard await requestDeviceDetailCommand(.getSoundOutput, failureMessage: "Failed to request sound output") else { return }
         _ = await requestDeviceDetailCommand(.getVolume, failureMessage: "Failed to request volume")
     }

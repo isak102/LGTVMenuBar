@@ -202,6 +202,82 @@ struct WebOSClientTests {
 
         #expect(recorder.soundOutput == .externalArc)
     }
+
+    @Test("listLaunchPoints response delivers installed apps")
+    func listLaunchPointsResponseDeliversInstalledApps() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager())
+        let recorder = WebOSPayloadRecorder()
+        client.setInstalledAppsCallback { apps in
+            recorder.apps = apps
+        }
+        client.setTestSendCommandHandler { _ in }
+
+        let message = """
+        {
+          "type": "response",
+          "payload": {
+            "returnValue": true,
+            "launchPoints": [
+              {"id": "netflix", "title": "Netflix", "launchPointId": "netflix_default"},
+              {"id": "youtube.leanback.v4", "title": "YouTube"},
+              {"title": "No id here"}
+            ]
+          }
+        }
+        """
+
+        await client.handleMessageForTesting(message)
+
+        #expect(recorder.apps?.map(\.id) == ["netflix", "youtube.leanback.v4"])
+        #expect(recorder.apps?.first?.title == "Netflix")
+        #expect(recorder.apps?.first?.launchPointId == "netflix_default")
+    }
+
+    @Test("getInstalledApps sends listLaunchPoints URI")
+    func getInstalledAppsSendsListLaunchPointsURI() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager())
+        var sent: [WebOSCommand] = []
+        client.setConnectionStateForTesting(.connected, handshakeCompleted: true)
+        client.setTestSendCommandHandler { command in
+            sent.append(command)
+        }
+
+        try? await client.sendCommand(.getInstalledApps)
+
+        guard case .getInstalledApps = sent.first else {
+            Issue.record("Expected getInstalledApps command")
+            return
+        }
+    }
+
+    @Test("launchApp sends launch URI")
+    func launchAppSendsLaunchURI() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager())
+        var sent: [WebOSCommand] = []
+        client.setConnectionStateForTesting(.connected, handshakeCompleted: true)
+        client.setTestSendCommandHandler { command in
+            sent.append(command)
+        }
+
+        try? await client.sendCommand(.launchApp("netflix"))
+
+        guard case .launchApp(let appId) = sent.first else {
+            Issue.record("Expected launchApp command")
+            return
+        }
+        #expect(appId == "netflix")
+    }
+
+    @Test("registration manifest requests installed-apps permission")
+    func registrationManifestRequestsInstalledAppsPermission() {
+        let manifest = WebOSClient.registrationManifest()
+        let permissions = manifest["permissions"] as? [String] ?? []
+        #expect(permissions.contains("READ_INSTALLED_APPS"))
+        #expect(manifest["signed"] != nil)
+        let signed = manifest["signed"] as? [String: Any]
+        let signedPermissions = signed?["permissions"] as? [String] ?? []
+        #expect(signedPermissions.contains("READ_INSTALLED_APPS"))
+    }
 }
 
 private final class WebOSPayloadRecorder: @unchecked Sendable {
@@ -209,4 +285,5 @@ private final class WebOSPayloadRecorder: @unchecked Sendable {
     var volume: Int?
     var isMuted: Bool?
     var soundOutput: TVSoundOutput?
+    var apps: [TVApp]?
 }

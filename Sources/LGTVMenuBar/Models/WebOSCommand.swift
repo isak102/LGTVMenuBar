@@ -5,6 +5,8 @@ public enum WebOSCommand: Sendable {
     case getForegroundAppInfo
     case getCurrentForegroundAppInfo  // One-time query without subscription
     case getInputList
+    case getInstalledApps
+    case launchApp(String)
     case powerOn
     case powerOff
     case volumeUp

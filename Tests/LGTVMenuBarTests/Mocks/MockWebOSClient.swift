@@ -57,6 +57,7 @@ final class MockWebOSClient: WebOSClientProtocol {
     private var inputChangeCallback: (@Sendable (TVInputType) -> Void)?
     private var volumeChangeCallback: (@Sendable (Int, Bool) -> Void)?
     private var inputListCallback: (@Sendable ([String: String]) -> Void)?
+    private var installedAppsCallback: (@Sendable ([TVApp]) -> Void)?
     private var soundOutputChangeCallback: (@Sendable (TVSoundOutput) -> Void)?
     private var diagnosticPayloadCallback: ((String, String) -> Void)?
     
@@ -170,6 +171,10 @@ final class MockWebOSClient: WebOSClientProtocol {
         self.inputListCallback = callback
     }
     
+    func setInstalledAppsCallback(_ callback: @escaping @Sendable ([TVApp]) -> Void) {
+        self.installedAppsCallback = callback
+    }
+
     func setSoundOutputChangeCallback(_ callback: @escaping @Sendable (TVSoundOutput) -> Void) {
         self.soundOutputChangeCallback = callback
     }
@@ -203,10 +208,10 @@ final class MockWebOSClient: WebOSClientProtocol {
         inputChangeCallback = nil
         volumeChangeCallback = nil
         inputListCallback = nil
+        installedAppsCallback = nil
         soundOutputChangeCallback = nil
         diagnosticPayloadCallback = nil
-    }
-    
+    }    
     /// Get number of times connect was called
     var connectCallCount: Int {
         return connectCalls.count
@@ -282,6 +287,11 @@ final class MockWebOSClient: WebOSClientProtocol {
         inputListCallback?(inputIcons)
     }
     
+    /// Simulate installed apps update
+    func simulateInstalledAppsUpdate(_ apps: [TVApp]) {
+        installedAppsCallback?(apps)
+    }
+
     /// Simulate sound output change
     func simulateSoundOutputChange(_ soundOutput: TVSoundOutput) {
         soundOutputChangeCallback?(soundOutput)

@@ -41,6 +41,8 @@ struct MenuBarView: View {
                 Divider()
                 VolumeSection(controller: controller, onError: reportActionError)
                 Divider()
+                AppsSection(controller: controller, onError: reportActionError)
+                Divider()
             } else if arylicOnly {
                 VolumeSection(controller: controller, onError: reportActionError)
                 Divider()
@@ -666,6 +668,85 @@ final class ScrollableNSSlider: NSSlider {
     static func scrolledValue(_ value: Double, deltaY: CGFloat, min: Double, max: Double) -> Double {
         guard deltaY != 0 else { return value }
         return Swift.min(Swift.max(value + (deltaY.sign == .minus ? -0.01 : 0.01), min), max)
+    }
+}
+
+// MARK: - Apps Section
+
+private struct AppsSection: View {
+    @Bindable var controller: TVController
+    let onError: (Error) -> Void
+    @State private var isRefreshing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: "square.grid.2x2")
+                    .foregroundStyle(.secondary)
+                Text("Apps")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    Task {
+                        isRefreshing = true
+                        defer { isRefreshing = false }
+                        await controller.refreshInstalledApps()
+                    }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isRefreshing || controller.installedApps.isEmpty)
+                .help("Refresh app list")
+                .accessibilityLabel("Refresh app list")
+            }
+
+            if controller.installedApps.isEmpty {
+                Button {
+                    Task {
+                        isRefreshing = true
+                        defer { isRefreshing = false }
+                        await controller.refreshInstalledApps()
+                    }
+                } label: {
+                    Text(isRefreshing ? "Loading apps..." : "Load apps")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing)
+            } else {
+                Menu {
+                    ForEach(controller.installedApps) { app in
+                        Button(app.title) {
+                            Task {
+                                do {
+                                    try await controller.launchApp(app)
+                                } catch {
+                                    onError(error)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Image(systemName: "play.tv")
+                        Text("Launch app")
+                        Spacer()
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 6)
+                    .background(.quaternary)
+                    .cornerRadius(6)
+                }
+                .menuStyle(.borderlessButton)
+            }
+        }
     }
 }
 

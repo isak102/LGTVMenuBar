@@ -59,6 +59,12 @@ final class MockTVController: TVControllerProtocol, Sendable {
     
     /// History of switchInput calls
     private(set) var switchInputCalls: [(input: TVInputType, timestamp: Date)] = []
+
+    /// History of launchApp calls
+    private(set) var launchAppCalls: [(app: TVApp, timestamp: Date)] = []
+
+    /// History of refreshInstalledApps calls
+    private(set) var refreshInstalledAppsCalls: [Date] = []
     
     /// History of isLaunchAtLoginEnabled calls
     private(set) var isLaunchAtLoginEnabledCalls: [Date] = []
@@ -85,6 +91,9 @@ final class MockTVController: TVControllerProtocol, Sendable {
     
     /// Current input
     var currentInput: TVInputType?
+
+    /// Installed apps
+    var installedApps: [TVApp] = []
     
     /// Current sound output
     var soundOutput: TVSoundOutput = .unknown
@@ -285,6 +294,26 @@ final class MockTVController: TVControllerProtocol, Sendable {
         currentInput = input
     }
     
+    func refreshInstalledApps() async {
+        refreshInstalledAppsCalls.append(Date())
+        
+        if operationDelay > 0 {
+            try? await Task.sleep(for: .seconds(operationDelay))
+        }
+    }
+    
+    func launchApp(_ app: TVApp) async throws {
+        launchAppCalls.append((app: app, timestamp: Date()))
+        
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+        
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+    
     func setSoundOutput(_ output: TVSoundOutput) async throws {
         if operationDelay > 0 {
             try await Task.sleep(for: .seconds(operationDelay))
@@ -343,6 +372,8 @@ final class MockTVController: TVControllerProtocol, Sendable {
         setVolumeCalls.removeAll()
         toggleMuteCalls.removeAll()
         switchInputCalls.removeAll()
+        launchAppCalls.removeAll()
+        refreshInstalledAppsCalls.removeAll()
         isLaunchAtLoginEnabledCalls.removeAll()
         setLaunchAtLoginCalls.removeAll()
         
@@ -352,6 +383,7 @@ final class MockTVController: TVControllerProtocol, Sendable {
         volume = 50
         isMuted = false
         currentInput = nil
+        installedApps = []
         soundOutput = .unknown
         isMediaKeyControlEnabled = false
         mockLaunchAtLoginEnabled = false
@@ -376,6 +408,8 @@ final class MockTVController: TVControllerProtocol, Sendable {
     var setVolumeCallCount: Int { setVolumeCalls.count }
     var toggleMuteCallCount: Int { toggleMuteCalls.count }
     var switchInputCallCount: Int { switchInputCalls.count }
+    var launchAppCallCount: Int { launchAppCalls.count }
+    var refreshInstalledAppsCallCount: Int { refreshInstalledAppsCalls.count }
     var isLaunchAtLoginEnabledCallCount: Int { isLaunchAtLoginEnabledCalls.count }
     var setLaunchAtLoginCallCount: Int { setLaunchAtLoginCalls.count }
     

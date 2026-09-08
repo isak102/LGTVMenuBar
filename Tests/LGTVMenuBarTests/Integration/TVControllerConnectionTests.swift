@@ -69,4 +69,92 @@ struct TVControllerConnectionTests {
 
         #expect(controller.connectionState == .disconnected)
     }
+
+    @Test("installed apps callback updates state sorted by title")
+    func installedAppsCallbackUpdatesState() async throws {
+        let mockWebOS = MockWebOSClient()
+
+        let controller = TVController(
+            webOSClient: mockWebOS,
+            wolService: MockWOLService(),
+            powerManager: MockPowerManager(),
+            keychainManager: MockKeychainManager(),
+            mediaKeyManager: MockMediaKeyManager(),
+            launchAtLoginManager: MockLaunchAtLoginManager(),
+            diagnosticLogger: MockDiagnosticLogger()
+        )
+
+        let config = TVConfiguration(
+            name: "Test TV",
+            ipAddress: "192.168.1.100",
+            macAddress: "AA:BB:CC:DD:EE:FF"
+        )
+        try controller.saveConfiguration(config)
+        try await controller.connect()
+
+        mockWebOS.simulateInstalledAppsUpdate([
+            TVApp(id: "youtube.leanback.v4", title: "YouTube"),
+            TVApp(id: "netflix", title: "Netflix"),
+        ])
+        await Task.yield()
+
+        #expect(controller.installedApps.map(\.title) == ["Netflix", "YouTube"])
+    }
+
+    @Test("launchApp sends launch command for app id")
+    func launchAppSendsLaunchCommand() async throws {
+        let mockWebOS = MockWebOSClient()
+
+        let controller = TVController(
+            webOSClient: mockWebOS,
+            wolService: MockWOLService(),
+            powerManager: MockPowerManager(),
+            keychainManager: MockKeychainManager(),
+            mediaKeyManager: MockMediaKeyManager(),
+            launchAtLoginManager: MockLaunchAtLoginManager(),
+            diagnosticLogger: MockDiagnosticLogger()
+        )
+
+        let config = TVConfiguration(
+            name: "Test TV",
+            ipAddress: "192.168.1.100",
+            macAddress: "AA:BB:CC:DD:EE:FF"
+        )
+        try controller.saveConfiguration(config)
+        try await controller.connect()
+
+        try await controller.launchApp(TVApp(id: "netflix", title: "Netflix"))
+
+        guard case .launchApp(let appId) = mockWebOS.sendCommandCalls.last?.command else {
+            Issue.record("Expected launchApp command")
+            return
+        }
+        #expect(appId == "netflix")
+    }
+
+    @Test("connect requests installed apps")
+    func connectRequestsInstalledApps() async throws {
+        let mockWebOS = MockWebOSClient()
+
+        let controller = TVController(
+            webOSClient: mockWebOS,
+            wolService: MockWOLService(),
+            powerManager: MockPowerManager(),
+            keychainManager: MockKeychainManager(),
+            mediaKeyManager: MockMediaKeyManager(),
+            launchAtLoginManager: MockLaunchAtLoginManager(),
+            diagnosticLogger: MockDiagnosticLogger()
+        )
+
+        let config = TVConfiguration(
+            name: "Test TV",
+            ipAddress: "192.168.1.100",
+            macAddress: "AA:BB:CC:DD:EE:FF"
+        )
+        try controller.saveConfiguration(config)
+        try await controller.connect()
+
+        let sent = mockWebOS.sendCommandCalls.map(\.command)
+        #expect(sent.contains { if case .getInstalledApps = $0 { return true }; return false })
+    }
 }
