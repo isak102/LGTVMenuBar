@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Main menu bar popover view displaying TV status and controls
@@ -447,15 +448,21 @@ private struct VolumeSection: View {
                 muteButton
                 
                 // Volume slider
-                Slider(value: $sliderPosition, in: 0...1) {
-                    Text("Volume")
-                } onEditingChanged: { editing in
-                    if !editing {
+                ScrollableSlider(
+                    value: $sliderPosition,
+                    onEditingChanged: { editing in
+                        if !editing {
+                            performAction {
+                                try await controller.setVolume(sliderToVolume(sliderPosition))
+                            }
+                        }
+                    },
+                    onScroll: { position in
                         performAction {
-                            try await controller.setVolume(sliderToVolume(sliderPosition))
+                            try await controller.setVolume(sliderToVolume(position))
                         }
                     }
-                }
+                )
                 
                 // Volume value
                 Text("\(sliderToVolume(sliderPosition))")
@@ -589,6 +596,76 @@ private struct VolumeSection: View {
                 onError(error)
             }
         }
+    }
+}
+
+private struct ScrollableSlider: NSViewRepresentable {
+    @Binding var value: Double
+    let onEditingChanged: (Bool) -> Void
+    let onScroll: (Double) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    func makeNSView(context: Context) -> ScrollableNSSlider {
+        let slider = ScrollableNSSlider()
+        slider.minValue = 0
+        slider.maxValue = 1
+        slider.isContinuous = true
+        slider.target = context.coordinator
+        slider.action = #selector(Coordinator.valueChanged(_:))
+        slider.setAccessibilityLabel("Volume")
+        return slider
+    }
+
+    func updateNSView(_ slider: ScrollableNSSlider, context: Context) {
+        slider.doubleValue = value
+        slider.onEditingChanged = onEditingChanged
+        slider.onScroll = onScroll
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        @Binding private var value: Double
+
+        init(value: Binding<Double>) {
+            self._value = value
+        }
+
+        @objc func valueChanged(_ sender: NSSlider) {
+            value = sender.doubleValue
+        }
+    }
+}
+
+final class ScrollableNSSlider: NSSlider {
+    var onEditingChanged: ((Bool) -> Void)?
+    var onScroll: ((Double) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        onEditingChanged?(true)
+        super.mouseDown(with: event)
+        onEditingChanged?(false)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        let newValue = Self.scrolledValue(
+            doubleValue,
+            deltaY: event.scrollingDeltaY,
+            min: minValue,
+            max: maxValue
+        )
+        guard newValue != doubleValue else { return }
+
+        doubleValue = newValue
+        sendAction(action, to: target)
+        onScroll?(newValue)
+    }
+
+    static func scrolledValue(_ value: Double, deltaY: CGFloat, min: Double, max: Double) -> Double {
+        guard deltaY != 0 else { return value }
+        return Swift.min(Swift.max(value + (deltaY.sign == .minus ? -0.01 : 0.01), min), max)
     }
 }
 
