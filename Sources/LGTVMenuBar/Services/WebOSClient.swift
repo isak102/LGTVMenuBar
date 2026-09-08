@@ -1047,9 +1047,11 @@ final class WebOSClient: WebOSClientProtocol {
         case .getPowerState:
             message["uri"] = "ssap://com.webos.service.tvpower/power/getPowerState"
         case .mute:
-            message["uri"] = "ssap://audio/mute"
+            message["uri"] = "ssap://audio/setMute"
+            message["payload"] = ["mute": true]
         case .unmute:
-            message["uri"] = "ssap://audio/unmute"
+            message["uri"] = "ssap://audio/setMute"
+            message["payload"] = ["mute": false]
         case .setInput(let inputId):
             message["uri"] = "ssap://tv/switchInput"
             message["payload"] = ["inputId": inputId]
