@@ -19,6 +19,9 @@ public protocol WebOSClientProtocol {
     func disconnect()
     func sendCommand(_ command: WebOSCommand) async throws
     func sendNavigationButton(_ button: TVNavigationButton) async throws
+    func sendPointerMove(dx: Int, dy: Int) async throws
+    func sendPointerScroll(dx: Int, dy: Int) async throws
+    func sendPointerClick() async throws
     func getPowerStatus() async throws -> TVPowerStatus
     func setCapabilityCallback(_ callback: @escaping @Sendable (TVCapabilities) -> Void)
     func setInputChangeCallback(_ callback: @escaping @Sendable (TVInputType) -> Void)
@@ -424,26 +427,21 @@ final class WebOSClient: WebOSClientProtocol {
     }
 
     func sendNavigationButton(_ button: TVNavigationButton) async throws {
-        guard _connectionState == .connected, handshakeCompleted else {
-            throw LGTVError.webosError("Not connected to TV")
-        }
+        try await sendPointerInput("type:button\nname:\(button.rawValue)\n\n")
+    }
 
-        let socket = try await pointerInputSocketTask()
-        do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                socket.send(.string("type:button\nname:\(button.rawValue)\n\n")) { error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
-                }
-            }
-        } catch {
-            pointerInputSocket?.cancel(with: .goingAway, reason: nil)
-            pointerInputSocket = nil
-            throw LGTVError.webosError("Failed to send remote button: \(error.localizedDescription)")
-        }
+    func sendPointerMove(dx: Int, dy: Int) async throws {
+        guard dx != 0 || dy != 0 else { return }
+        try await sendPointerInput("type:move\ndx:\(dx)\ndy:\(dy)\n\n")
+    }
+
+    func sendPointerScroll(dx: Int, dy: Int) async throws {
+        guard dx != 0 || dy != 0 else { return }
+        try await sendPointerInput("type:scroll\ndx:\(dx)\ndy:\(dy)\n\n")
+    }
+
+    func sendPointerClick() async throws {
+        try await sendPointerInput("type:click\n\n")
     }
 
     func getPowerStatus() async throws -> TVPowerStatus {
@@ -984,6 +982,29 @@ final class WebOSClient: WebOSClientProtocol {
             return String(data: data, encoding: .utf8) ?? String(describing: payload)
         } catch {
             return String(describing: payload)
+        }
+    }
+
+    private func sendPointerInput(_ input: String) async throws {
+        guard _connectionState == .connected, handshakeCompleted else {
+            throw LGTVError.webosError("Not connected to TV")
+        }
+
+        let socket = try await pointerInputSocketTask()
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                socket.send(.string(input)) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            pointerInputSocket?.cancel(with: .goingAway, reason: nil)
+            pointerInputSocket = nil
+            throw LGTVError.webosError("Failed to send pointer input: \(error.localizedDescription)")
         }
     }
 

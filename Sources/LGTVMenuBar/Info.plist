@@ -29,7 +29,7 @@
     <key>NSLocalNetworkUsageDescription</key>
     <string>LGTV Menu Bar needs local network access to communicate with your LG TV.</string>
     <key>NSAccessibilityUsageDescription</key>
-    <string>LGTV Menu Bar needs Accessibility permission to capture volume keys for TV control.</string>
+    <string>LGTV Menu Bar needs Accessibility permission to capture media keys and send keyboard input to your TV.</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
 </dict>

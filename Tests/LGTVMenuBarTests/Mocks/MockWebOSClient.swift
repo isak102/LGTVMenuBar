@@ -51,6 +51,15 @@ final class MockWebOSClient: WebOSClientProtocol {
     /// History of remote navigation button presses
     private(set) var navigationButtonCalls: [(button: TVNavigationButton, timestamp: Date)] = []
 
+    /// History of pointer movements.
+    private(set) var pointerMoveCalls: [(dx: Int, dy: Int, timestamp: Date)] = []
+
+    /// History of pointer scrolling.
+    private(set) var pointerScrollCalls: [(dx: Int, dy: Int, timestamp: Date)] = []
+
+    /// History of pointer clicks.
+    private(set) var pointerClickCalls: [Date] = []
+
     /// History of power status requests
     private(set) var getPowerStatusCalls: [Date] = []
     
@@ -129,6 +138,33 @@ final class MockWebOSClient: WebOSClientProtocol {
 
     func sendNavigationButton(_ button: TVNavigationButton) async throws {
         navigationButtonCalls.append((button: button, timestamp: Date()))
+
+        if shouldThrowOnSendCommand {
+            transitionToErrorIfNeeded(errorToThrow)
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerMove(dx: Int, dy: Int) async throws {
+        pointerMoveCalls.append((dx: dx, dy: dy, timestamp: Date()))
+
+        if shouldThrowOnSendCommand {
+            transitionToErrorIfNeeded(errorToThrow)
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerScroll(dx: Int, dy: Int) async throws {
+        pointerScrollCalls.append((dx: dx, dy: dy, timestamp: Date()))
+
+        if shouldThrowOnSendCommand {
+            transitionToErrorIfNeeded(errorToThrow)
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerClick() async throws {
+        pointerClickCalls.append(Date())
 
         if shouldThrowOnSendCommand {
             transitionToErrorIfNeeded(errorToThrow)

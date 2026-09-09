@@ -643,6 +643,21 @@ public final class TVController: TVControllerProtocol {
         try await webOSClient.sendNavigationButton(button)
     }
 
+    /// Move the TV's on-screen pointer by a relative amount.
+    public func sendPointerMove(dx: Int, dy: Int) async throws {
+        try await webOSClient.sendPointerMove(dx: dx, dy: dy)
+    }
+
+    /// Scroll at the TV's current on-screen pointer location.
+    public func sendPointerScroll(dx: Int, dy: Int) async throws {
+        try await webOSClient.sendPointerScroll(dx: dx, dy: dy)
+    }
+
+    /// Click at the TV's current on-screen pointer location.
+    public func sendPointerClick() async throws {
+        try await webOSClient.sendPointerClick()
+    }
+
     /// Refresh the installed app list from the TV launcher
     public func refreshInstalledApps() async {
         guard isWebOSConnectionReady else {

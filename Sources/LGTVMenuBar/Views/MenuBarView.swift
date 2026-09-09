@@ -4,6 +4,7 @@ import SwiftUI
 /// Main menu bar popover view displaying TV status and controls
 struct MenuBarView: View {
     @Bindable var controller: TVController
+    let mouseControl: MouseControlManager?
     let softwareUpdates: SoftwareUpdateController?
     let onOpenSettings: (() -> Void)?
     @State private var showingSettings = false
@@ -14,10 +15,12 @@ struct MenuBarView: View {
     
     init(
         controller: TVController,
+        mouseControl: MouseControlManager? = nil,
         softwareUpdates: SoftwareUpdateController? = nil,
         onOpenSettings: (() -> Void)? = nil
     ) {
         self.controller = controller
+        self.mouseControl = mouseControl
         self.softwareUpdates = softwareUpdates
         self.onOpenSettings = onOpenSettings
     }
@@ -38,6 +41,9 @@ struct MenuBarView: View {
             #endif
             if controller.connectionState.isConnected {
                 TextInputSection(controller: controller, onError: reportActionError)
+                if let mouseControl {
+                    MouseControlSection(mouseControl: mouseControl)
+                }
                 Divider()
                 QuickActionsSection(controller: controller, audioOutputType: audioOutputType, onError: reportActionError)
                 Divider()
@@ -283,6 +289,21 @@ private struct TVKeyboardTextField: NSViewRepresentable {
                 return false
             }
         }
+    }
+}
+
+// MARK: - Mouse Control Section
+
+private struct MouseControlSection: View {
+    let mouseControl: MouseControlManager
+
+    var body: some View {
+        Toggle("Control TV pointer", isOn: Binding(
+            get: { mouseControl.isEnabled },
+            set: { mouseControl.setEnabled($0) }
+        ))
+        .help("Send mouse, scrolling, and typing to the TV. Press Escape to turn it off.")
+        .accessibilityLabel("Control TV pointer")
     }
 }
 

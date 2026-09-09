@@ -50,6 +50,9 @@ public protocol TVControllerProtocol: Sendable {
     func deleteCharacters(_ count: Int) async throws
     func sendEnterKey() async throws
     func sendNavigationButton(_ button: TVNavigationButton) async throws
+    func sendPointerMove(dx: Int, dy: Int) async throws
+    func sendPointerScroll(dx: Int, dy: Int) async throws
+    func sendPointerClick() async throws
     func refreshInstalledApps() async
     func launchApp(_ app: TVApp) async throws
     func setSoundOutput(_ output: TVSoundOutput) async throws

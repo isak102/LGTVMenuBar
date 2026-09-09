@@ -72,6 +72,15 @@ final class MockTVController: TVControllerProtocol, Sendable {
     /// History of remote navigation button presses
     private(set) var navigationButtonCalls: [(button: TVNavigationButton, timestamp: Date)] = []
 
+    /// History of pointer movements.
+    private(set) var pointerMoveCalls: [(dx: Int, dy: Int, timestamp: Date)] = []
+
+    /// History of pointer scrolling.
+    private(set) var pointerScrollCalls: [(dx: Int, dy: Int, timestamp: Date)] = []
+
+    /// History of pointer clicks.
+    private(set) var pointerClickCalls: [Date] = []
+
     /// History of launchApp calls
     private(set) var launchAppCalls: [(app: TVApp, timestamp: Date)] = []
 
@@ -344,6 +353,42 @@ final class MockTVController: TVControllerProtocol, Sendable {
 
     func sendNavigationButton(_ button: TVNavigationButton) async throws {
         navigationButtonCalls.append((button: button, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerMove(dx: Int, dy: Int) async throws {
+        pointerMoveCalls.append((dx: dx, dy: dy, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerScroll(dx: Int, dy: Int) async throws {
+        pointerScrollCalls.append((dx: dx, dy: dy, timestamp: Date()))
+
+        if operationDelay > 0 {
+            try await Task.sleep(for: .seconds(operationDelay))
+        }
+
+        if shouldThrowError {
+            throw errorToThrow
+        }
+    }
+
+    func sendPointerClick() async throws {
+        pointerClickCalls.append(Date())
 
         if operationDelay > 0 {
             try await Task.sleep(for: .seconds(operationDelay))

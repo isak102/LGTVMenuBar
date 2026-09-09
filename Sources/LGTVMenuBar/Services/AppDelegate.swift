@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var uxTestingWindow: NSWindow?
     private var controller: TVController!
+    private var mouseControl: MouseControlManager!
     private let softwareUpdates = SoftwareUpdateController()
     private var eventMonitors: [Any] = []
     
@@ -24,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Initialize controller
         controller = TVController()
+        mouseControl = MouseControlManager(controller: controller)
 
         #if UX_TESTING_APP
         controller.applyUXTestingFixture()
@@ -41,8 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
 
         controller.connectionStateDidChange = { [weak self] state in
-            guard let statusItem = self?.statusItem else { return }
-            StatusItemIconManager.updateStatusItem(statusItem, for: state)
+            guard let self else { return }
+            if !state.isConnected {
+                self.mouseControl.stop()
+            }
+            if let statusItem = self.statusItem {
+                StatusItemIconManager.updateStatusItem(statusItem, for: state)
+            }
         }
         
         // Set up popover with custom behavior
@@ -71,6 +78,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ notification: Notification) {
+        mouseControl?.stop()
+
         // Clean up event monitors
         for monitor in eventMonitors {
             NSEvent.removeMonitor(monitor)
@@ -138,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.animates = true
         
         // Create hosting controller with MenuBarView
-        let contentView = MenuBarView(controller: controller, softwareUpdates: softwareUpdates) { [weak self] in
+        let contentView = MenuBarView(controller: controller, mouseControl: mouseControl, softwareUpdates: softwareUpdates) { [weak self] in
             Task { @MainActor in
                 self?.hidePopover()
                 self?.showSettingsWindow()
