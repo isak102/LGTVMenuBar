@@ -106,6 +106,8 @@ final class WebOSClient: WebOSClientProtocol {
 
     /// Separate socket used for remote navigation buttons.
     private var pointerInputSocket: URLSessionWebSocketTask?
+    private var pointerInputSocketLastUsedAt: Date?
+    private let pointerInputSocketIdleRefreshInterval: TimeInterval = 10
 
     /// Continuation used while waiting for the TV to acknowledge registration.
     private var handshakeContinuation: CheckedContinuation<Void, Error>?
@@ -1001,6 +1003,7 @@ final class WebOSClient: WebOSClientProtocol {
                     }
                 }
             }
+            pointerInputSocketLastUsedAt = Date()
         } catch {
             pointerInputSocket?.cancel(with: .goingAway, reason: nil)
             pointerInputSocket = nil
@@ -1009,9 +1012,15 @@ final class WebOSClient: WebOSClientProtocol {
     }
 
     private func pointerInputSocketTask() async throws -> URLSessionWebSocketTask {
-        if let pointerInputSocket {
+        if let pointerInputSocket,
+           let pointerInputSocketLastUsedAt,
+           Date().timeIntervalSince(pointerInputSocketLastUsedAt) < pointerInputSocketIdleRefreshInterval {
             return pointerInputSocket
         }
+
+        pointerInputSocket?.cancel(with: .goingAway, reason: nil)
+        pointerInputSocket = nil
+        pointerInputSocketLastUsedAt = nil
 
         let response = try await sendCommandAwaitingResponse(.getPointerInputSocket)
         guard let socketPath = response.socketPath,
