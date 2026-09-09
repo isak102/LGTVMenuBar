@@ -557,17 +557,14 @@ private struct QuickActionsSection: View {
 private struct VolumeSection: View {
     @Bindable var controller: TVController
     let onError: (Error) -> Void
-    @State private var sliderPosition: Double = 0.5  // 0-1 range, maps to volume via curve
+    @State private var sliderPosition: Double = 0.5
     
-    /// Convert slider position (0-1) to volume (0-100) with power curve
-    /// Exponent 2.0 = strong resistance at high volumes
     private func sliderToVolume(_ position: Double) -> Int {
-        Int((pow(position, 2.0) * 100).rounded())
+        Int((position * 100).rounded())
     }
     
-    /// Convert volume (0-100) to slider position (0-1) - inverse of above
     private func volumeToSlider(_ volume: Int) -> Double {
-        pow(Double(volume) / 100.0, 1.0 / 2.0) // sqrt
+        Double(volume) / 100
     }
     
     var body: some View {
@@ -703,7 +700,7 @@ private struct VolumeSection: View {
             Task {
                 do {
                     try await controller.volumeDown()
-                    // Update slider position based on new volume (linear 1% decrement)
+                    // Update slider position based on the new volume.
                     let currentVolume = sliderToVolume(sliderPosition)
                     let newVolume = max(0, currentVolume - 1)
                     sliderPosition = volumeToSlider(newVolume)
@@ -724,7 +721,7 @@ private struct VolumeSection: View {
             Task {
                 do {
                     try await controller.volumeUp()
-                    // Update slider position based on new volume (linear 1% increment)
+                    // Update slider position based on the new volume.
                     let currentVolume = sliderToVolume(sliderPosition)
                     let newVolume = min(100, currentVolume + 1)
                     sliderPosition = volumeToSlider(newVolume)
