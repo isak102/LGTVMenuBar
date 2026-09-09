@@ -53,6 +53,7 @@ public protocol TVControllerProtocol: Sendable {
     func sendPointerMove(dx: Int, dy: Int) async throws
     func sendPointerScroll(dx: Int, dy: Int) async throws
     func sendPointerClick() async throws
+    func resetPointerInputSocket()
     func refreshInstalledApps() async
     func launchApp(_ app: TVApp) async throws
     func setSoundOutput(_ output: TVSoundOutput) async throws

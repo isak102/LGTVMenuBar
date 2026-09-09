@@ -60,6 +60,9 @@ final class MockWebOSClient: WebOSClientProtocol {
     /// History of pointer clicks.
     private(set) var pointerClickCalls: [Date] = []
 
+    /// History of pointer socket resets.
+    private(set) var resetPointerInputSocketCalls: [Date] = []
+
     /// History of power status requests
     private(set) var getPowerStatusCalls: [Date] = []
     
@@ -170,6 +173,10 @@ final class MockWebOSClient: WebOSClientProtocol {
             transitionToErrorIfNeeded(errorToThrow)
             throw errorToThrow
         }
+    }
+
+    func resetPointerInputSocket() {
+        resetPointerInputSocketCalls.append(Date())
     }
 
     func getPowerStatus() async throws -> TVPowerStatus {

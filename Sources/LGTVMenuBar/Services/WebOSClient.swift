@@ -22,6 +22,7 @@ public protocol WebOSClientProtocol {
     func sendPointerMove(dx: Int, dy: Int) async throws
     func sendPointerScroll(dx: Int, dy: Int) async throws
     func sendPointerClick() async throws
+    func resetPointerInputSocket()
     func getPowerStatus() async throws -> TVPowerStatus
     func setCapabilityCallback(_ callback: @escaping @Sendable (TVCapabilities) -> Void)
     func setInputChangeCallback(_ callback: @escaping @Sendable (TVInputType) -> Void)
@@ -106,8 +107,6 @@ final class WebOSClient: WebOSClientProtocol {
 
     /// Separate socket used for remote navigation buttons.
     private var pointerInputSocket: URLSessionWebSocketTask?
-    private var pointerInputSocketLastUsedAt: Date?
-    private let pointerInputSocketIdleRefreshInterval: TimeInterval = 10
 
     /// Continuation used while waiting for the TV to acknowledge registration.
     private var handshakeContinuation: CheckedContinuation<Void, Error>?
@@ -444,6 +443,11 @@ final class WebOSClient: WebOSClientProtocol {
 
     func sendPointerClick() async throws {
         try await sendPointerInput("type:click\n\n")
+    }
+
+    func resetPointerInputSocket() {
+        pointerInputSocket?.cancel(with: .goingAway, reason: nil)
+        pointerInputSocket = nil
     }
 
     func getPowerStatus() async throws -> TVPowerStatus {
@@ -992,35 +996,35 @@ final class WebOSClient: WebOSClientProtocol {
             throw LGTVError.webosError("Not connected to TV")
         }
 
-        let socket = try await pointerInputSocketTask()
         do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                socket.send(.string(input)) { error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
+            try await sendPointerInput(input, using: pointerInputSocketTask())
+        } catch {
+            resetPointerInputSocket()
+            do {
+                try await sendPointerInput(input, using: pointerInputSocketTask())
+            } catch {
+                resetPointerInputSocket()
+                throw LGTVError.webosError("Failed to send pointer input: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func sendPointerInput(_ input: String, using socket: URLSessionWebSocketTask) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            socket.send(.string(input)) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
                 }
             }
-            pointerInputSocketLastUsedAt = Date()
-        } catch {
-            pointerInputSocket?.cancel(with: .goingAway, reason: nil)
-            pointerInputSocket = nil
-            throw LGTVError.webosError("Failed to send pointer input: \(error.localizedDescription)")
         }
     }
 
     private func pointerInputSocketTask() async throws -> URLSessionWebSocketTask {
-        if let pointerInputSocket,
-           let pointerInputSocketLastUsedAt,
-           Date().timeIntervalSince(pointerInputSocketLastUsedAt) < pointerInputSocketIdleRefreshInterval {
+        if let pointerInputSocket {
             return pointerInputSocket
         }
-
-        pointerInputSocket?.cancel(with: .goingAway, reason: nil)
-        pointerInputSocket = nil
-        pointerInputSocketLastUsedAt = nil
 
         let response = try await sendCommandAwaitingResponse(.getPointerInputSocket)
         guard let socketPath = response.socketPath,

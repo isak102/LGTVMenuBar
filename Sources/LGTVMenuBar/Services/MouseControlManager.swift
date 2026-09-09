@@ -62,6 +62,7 @@ final class MouseControlManager {
             unavailableReason = "Accessibility permission is required for keyboard control."
             return
         }
+        controller.resetPointerInputSocket()
         guard startInputCapture() else {
             unavailableReason = "Mouse and keyboard capture could not be started."
             return

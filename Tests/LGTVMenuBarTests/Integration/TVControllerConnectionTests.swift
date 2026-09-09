@@ -152,6 +152,7 @@ struct TVControllerConnectionTests {
         try await controller.sendPointerMove(dx: 12, dy: -8)
         try await controller.sendPointerScroll(dx: 0, dy: -3)
         try await controller.sendPointerClick()
+        controller.resetPointerInputSocket()
 
         let sent = mockWebOS.sendCommandCalls.map(\.command)
         guard case .insertText(let text) = sent[0] else {
@@ -174,6 +175,7 @@ struct TVControllerConnectionTests {
         #expect(mockWebOS.pointerScrollCalls.last?.dx == 0)
         #expect(mockWebOS.pointerScrollCalls.last?.dy == -3)
         #expect(mockWebOS.pointerClickCalls.count == 1)
+        #expect(mockWebOS.resetPointerInputSocketCalls.count == 1)
     }
 
     @Test("connect requests installed apps")

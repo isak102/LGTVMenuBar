@@ -81,6 +81,9 @@ final class MockTVController: TVControllerProtocol, Sendable {
     /// History of pointer clicks.
     private(set) var pointerClickCalls: [Date] = []
 
+    /// History of pointer socket resets.
+    private(set) var resetPointerInputSocketCalls: [Date] = []
+
     /// History of launchApp calls
     private(set) var launchAppCalls: [(app: TVApp, timestamp: Date)] = []
 
@@ -397,6 +400,10 @@ final class MockTVController: TVControllerProtocol, Sendable {
         if shouldThrowError {
             throw errorToThrow
         }
+    }
+
+    func resetPointerInputSocket() {
+        resetPointerInputSocketCalls.append(Date())
     }
     
     func refreshInstalledApps() async {

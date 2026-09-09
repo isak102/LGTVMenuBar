@@ -658,6 +658,11 @@ public final class TVController: TVControllerProtocol {
         try await webOSClient.sendPointerClick()
     }
 
+    /// Discard a potentially stale TV pointer socket before starting pointer control.
+    public func resetPointerInputSocket() {
+        webOSClient.resetPointerInputSocket()
+    }
+
     /// Refresh the installed app list from the TV launcher
     public func refreshInstalledApps() async {
         guard isWebOSConnectionReady else {
