@@ -107,6 +107,59 @@ struct WebOSClientTests {
         #expect(client.connectionState == .connecting)
     }
 
+    @Test("heartbeat failure marks a stale connection as errored")
+    func heartbeatFailureMarksConnectionError() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager(), pingInterval: 0.01, pongTimeout: 0.01)
+        var observedStates: [ConnectionState] = []
+        client.setTestStateChangeObserver { state in
+            observedStates.append(state)
+        }
+
+        let attempt = client.beginConnectionAttemptForTesting()
+        client.setConnectionStateForTesting(.connected, handshakeCompleted: true)
+        client.setTestPingHandler { false }
+        client.startHeartbeatForTesting(attemptID: attempt)
+
+        #expect(await waitUntil { client.connectionState.hasError })
+        #expect(!client.connectionState.isConnected)
+        #expect(!client.handshakeCompletedForTesting)
+        #expect(observedStates.contains { $0.hasError })
+    }
+
+    @Test("heartbeat failure from a stale attempt is ignored")
+    func staleHeartbeatFailureIsIgnored() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager(), pingInterval: 0.01, pongTimeout: 0.01)
+        let staleAttempt = client.beginConnectionAttemptForTesting()
+        _ = client.beginConnectionAttemptForTesting()
+        client.setConnectionStateForTesting(.connected, handshakeCompleted: true)
+        client.setTestPingHandler { false }
+        client.startHeartbeatForTesting(attemptID: staleAttempt)
+
+        // The loop must bail on its first tick without touching the live connection.
+        try? await Task.sleep(for: .milliseconds(300))
+
+        #expect(client.connectionState.isConnected)
+        #expect(client.handshakeCompletedForTesting)
+    }
+
+    @Test("healthy heartbeat keeps pinging without dropping the connection")
+    func healthyHeartbeatKeepsConnection() async {
+        let client = WebOSClient(keychainManager: MockKeychainManager(), pingInterval: 0.01, pongTimeout: 0.01)
+        let counter = PingCounter()
+        let attempt = client.beginConnectionAttemptForTesting()
+        client.setConnectionStateForTesting(.connected, handshakeCompleted: true)
+        client.setTestPingHandler { await counter.recordPing() }
+        client.startHeartbeatForTesting(attemptID: attempt)
+
+        #expect(await waitUntil { await counter.count >= 3 })
+        #expect(client.connectionState.isConnected)
+        #expect(client.handshakeCompletedForTesting)
+
+        // Teardown ends the loop and the heartbeat with it.
+        client.disconnect()
+        #expect(await waitUntil { client.connectionState.isDisconnected })
+    }
+
     @Test("connect while registering does not restart pairing")
     func connectWhileRegisteringDoesNotRestartPairing() async throws {
         let client = WebOSClient(keychainManager: MockKeychainManager())
@@ -277,6 +330,33 @@ struct WebOSClientTests {
         let signed = manifest["signed"] as? [String: Any]
         let signedPermissions = signed?["permissions"] as? [String] ?? []
         #expect(signedPermissions.contains("READ_INSTALLED_APPS"))
+    }
+}
+
+/// Pumps the main actor until `condition` holds or the timeout elapses.
+/// The generous timeout only matters when other suites hog the main actor.
+@MainActor
+private func waitUntil(
+    timeout: Duration = .seconds(20),
+    _ condition: @MainActor () async -> Bool
+) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while ContinuousClock.now < deadline {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return await condition()
+}
+
+/// Counts heartbeat pings so tests can prove the loop actually runs.
+@MainActor
+private final class PingCounter {
+    private(set) var count = 0
+
+    /// Records a successful (ponged) ping.
+    func recordPing() -> Bool {
+        count += 1
+        return true
     }
 }
 

@@ -117,11 +117,23 @@ final class WebOSClient: WebOSClientProtocol {
     /// Connection timeout in seconds
     private let connectionTimeout: TimeInterval = 10.0
 
+    /// Interval between heartbeat pings while connected.
+    private let pingInterval: TimeInterval
+
+    /// How long to wait for a pong before treating the connection as dead.
+    private let pongTimeout: TimeInterval
+
     /// Optional test hook for observing connection state changes without a real socket.
     private var testStateChangeObserver: ((ConnectionState) -> Void)?
 
     /// Optional test hook for intercepting command sends without a live socket.
     private var testSendCommandHandler: ((WebOSCommand) async throws -> Void)?
+
+    /// Optional test hook for intercepting heartbeat pings without a live socket.
+    private var testPingHandler: (() async -> Bool)?
+
+    /// Keepalive loop that notices half-open sockets the transport never reports.
+    private var heartbeatTask: Task<Void, Never>?
     
     /// Current connection state
     var connectionState: ConnectionState {
@@ -129,7 +141,15 @@ final class WebOSClient: WebOSClientProtocol {
     }
     
     /// Initialize WebOSClient
-    init(keychainManager: KeychainManagerProtocol = KeychainManager()) {
+    /// - Parameters:
+    ///   - keychainManager: Storage for the pairing client key
+    ///   - pingInterval: Seconds between heartbeat pings while connected
+    ///   - pongTimeout: Seconds to wait for a pong before declaring the socket dead
+    init(
+        keychainManager: KeychainManagerProtocol = KeychainManager(),
+        pingInterval: TimeInterval = 30.0,
+        pongTimeout: TimeInterval = 10.0
+    ) {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 10
         configuration.timeoutIntervalForResource = 30
@@ -143,6 +163,8 @@ final class WebOSClient: WebOSClientProtocol {
         self.sslURLSession = URLSession(configuration: sslConfiguration, delegate: delegate, delegateQueue: nil)
         
         self.keychainManager = keychainManager
+        self.pingInterval = pingInterval
+        self.pongTimeout = pongTimeout
         
         logger.info("WebOSClient initialized")
     }
@@ -154,6 +176,19 @@ final class WebOSClient: WebOSClientProtocol {
 
     internal func setTestSendCommandHandler(_ handler: @escaping (WebOSCommand) async throws -> Void) {
         self.testSendCommandHandler = handler
+    }
+
+    /// Test-only hook that replaces the real ping/pong round trip.
+    internal func setTestPingHandler(_ handler: @escaping () async -> Bool) {
+        self.testPingHandler = handler
+    }
+
+    internal func startHeartbeatForTesting(attemptID: UInt64) {
+        startHeartbeat(attemptID: attemptID)
+    }
+
+    internal var handshakeCompletedForTesting: Bool {
+        handshakeCompleted
     }
 
     internal func setConnectionStateForTesting(_ state: ConnectionState, handshakeCompleted: Bool) {
@@ -176,6 +211,8 @@ final class WebOSClient: WebOSClientProtocol {
     
     deinit {
         _connectionState = .disconnected
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         webSocketTask?.cancel()
         webSocketTask = nil
         pointerInputSocket?.cancel()
@@ -341,6 +378,7 @@ final class WebOSClient: WebOSClientProtocol {
 
         logger.warning("Invalidating WebOS connection after transport failure: \(error.localizedDescription, privacy: .public)")
 
+        stopHeartbeat()
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         pointerInputSocket?.cancel(with: .goingAway, reason: nil)
@@ -572,6 +610,8 @@ final class WebOSClient: WebOSClientProtocol {
 
     @discardableResult
     private func beginConnectionAttempt() -> UInt64 {
+        // Every attempt (connect, reconnect, disconnect) invalidates the previous socket's heartbeat.
+        stopHeartbeat()
         connectionAttemptID &+= 1
         return connectionAttemptID
     }
@@ -649,6 +689,77 @@ final class WebOSClient: WebOSClientProtocol {
         logger.debug("Handshake completed")
     }
     
+    // MARK: - Heartbeat
+
+    /// Starts the keepalive loop that detects half-open sockets.
+    ///
+    /// When the TV powers off or drops off the network, no FIN/RST arrives, so
+    /// `receive()` blocks forever and the socket still looks connected (macOS TCP
+    /// keepalive defaults to ~2 hours). Pinging is the only way to notice.
+    private func startHeartbeat(attemptID: UInt64) {
+        stopHeartbeat()
+
+        let interval = pingInterval
+        heartbeatTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch {
+                    return
+                }
+
+                guard let self,
+                      self.connectionAttemptID == attemptID,
+                      self._connectionState == .connected else {
+                    return
+                }
+
+                let isAlive = await self.ping()
+                guard self.connectionAttemptID == attemptID else { return }
+
+                if !isAlive {
+                    self.logger.warning("WebOS heartbeat failed - connection is stale")
+                    self.handleConnectionFailure(
+                        LGTVError.webosError("Heartbeat ping timed out"),
+                        attemptID: attemptID
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
+    }
+
+    /// Sends one ping and waits at most `pongTimeout` for the pong.
+    /// - Returns: `true` when the TV answered in time.
+    private func ping() async -> Bool {
+        if let testPingHandler {
+            return await testPingHandler()
+        }
+
+        // A connected state with no socket is already broken.
+        guard let task = webSocketTask else { return false }
+
+        let signal = HeartbeatSignal()
+        task.sendPing { error in
+            Task { @MainActor in
+                signal.resume(error == nil)
+            }
+        }
+
+        let timeout = pongTimeout
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(timeout))
+            signal.resume(false)
+        }
+
+        return await signal.wait()
+    }
+
     /// Handle incoming WebSocket messages
     private func handleMessages(attemptID: UInt64) async {
         while isCurrentConnectionAttempt(attemptID) && (_connectionState == .connecting || _connectionState == .registering || _connectionState == .connected) {
@@ -720,6 +831,10 @@ final class WebOSClient: WebOSClientProtocol {
 
         handshakeCompleted = true
         publishConnectionState(.connected, attemptID: attemptID)
+
+        if let attemptID {
+            startHeartbeat(attemptID: attemptID)
+        }
 
         if let handshakeContinuation {
             self.handshakeContinuation = nil
@@ -1273,5 +1388,23 @@ final class WebOSClient: WebOSClientProtocol {
         }
         
         return message
+    }
+}
+
+/// Resumes a heartbeat wait exactly once, whichever lands first: the pong or the timeout.
+/// Necessary because `sendPing`'s completion handler and the timeout run concurrently.
+@MainActor
+private final class HeartbeatSignal {
+    private var continuation: CheckedContinuation<Bool, Never>?
+
+    func wait() async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume(_ isAlive: Bool) {
+        continuation?.resume(returning: isAlive)
+        continuation = nil
     }
 }
